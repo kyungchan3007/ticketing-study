@@ -62,6 +62,7 @@ pods:
       - id: review
         agent_ref: "path:NPM_ROOT/@openrig/cli/daemon/specs/agents/review/independent-reviewer"
         runtime: codex
+        model: gpt-5.6-sol
         profile: default
         permission_policy: builtin:yolo
         cwd: "../.."

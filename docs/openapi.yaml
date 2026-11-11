@@ -1,0 +1,306 @@
+openapi: 3.1.0
+info:
+  title: tkt 좌석 예매 API (MVP)
+  version: 0.1.0
+  description: |
+    docs/PRD.md 1차 범위(MVP)의 API 계약이다.
+
+    - 좌석 하나는 한 번만 팔린다. 동시 요청에서도 같다.
+    - 좌석 상태는 AVAILABLE → HELD → SOLD. 홀드 유지 시간은 300초이고, 현재 시각 ≥ expires_at 이면 만료다.
+    - 좌석맵에서 만료된 HELD는 AVAILABLE 로 보인다.
+    - 공연 목록·좌석맵 조회는 X-User-Id 없이 된다. 홀드·확정은 X-User-Id 가 필요하고 없으면 401 UNAUTHORIZED.
+    - 예매 확정은 그 좌석을 홀드한 사용자가, 홀드가 만료되기 전에만 할 수 있다.
+    - 공연과 좌석은 시드 데이터로 준비한다. 등록 API는 없다.
+    - 모든 오류 응답은 Error 스키마(code, message 두 칸)를 쓴다.
+    - 시각은 ISO 8601 UTC, 초 단위, 끝이 Z 다(예: 2026-12-01T10:05:00Z).
+
+    아직 정하지 않은 것(PRD 11절 열린 질문)은 이 계약에 넣지 않았다:
+    다른 사용자의 홀드로 확정할 때의 응답(Q3), 홀드 없이 확정할 때의 응답(Q4),
+    요청 형식 오류의 응답(Q9), 확정 결과로 돌려줄 예매 리소스(Q13).
+
+servers:
+  - url: http://localhost:8000
+
+tags:
+  - name: performances
+  - name: holds
+
+paths:
+  /performances:
+    get:
+      operationId: listPerformances
+      tags: [performances]
+      summary: 공연 목록 (US-01)
+      description: X-User-Id 없이 조회한다. 헤더가 있어도 결과는 같다. 공연이 없으면 빈 배열이다.
+      responses:
+        "200":
+          description: 공연 목록
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PerformanceList"
+
+  /performances/{performance_id}/seats:
+    parameters:
+      - $ref: "#/components/parameters/PerformanceId"
+    get:
+      operationId: getSeatMap
+      tags: [performances]
+      summary: 좌석맵 (US-02)
+      description: |
+        X-User-Id 없이 조회한다. 헤더가 있어도 결과는 같다.
+        만료된 HELD 좌석은 AVAILABLE 로 보인다.
+      responses:
+        "200":
+          description: 공연 하나의 좌석과 상태
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SeatMap"
+        "404":
+          description: 없는 공연 (PRD 5절 lead 제안, Q9)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                code: NOT_FOUND
+                message: 공연을 찾을 수 없습니다.
+
+  /performances/{performance_id}/seats/{seat_id}/hold:
+    parameters:
+      - $ref: "#/components/parameters/PerformanceId"
+      - $ref: "#/components/parameters/SeatId"
+    post:
+      operationId: holdSeat
+      tags: [holds]
+      summary: 좌석 홀드 (US-03)
+      description: |
+        좌석이 AVAILABLE 이거나 HELD 이지만 만료됐을 때만 성공한다.
+        성공하면 새 hold_id 를 만들고 expires_at = 현재 시각 + 300초 이다.
+      parameters:
+        - $ref: "#/components/parameters/XUserId"
+      responses:
+        "201":
+          description: 홀드 성공
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Hold"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: 없는 공연 또는 없는 좌석 (PRD 5절 lead 제안, Q9)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                code: NOT_FOUND
+                message: 좌석을 찾을 수 없습니다.
+        "409":
+          description: 좌석 상태와 부딪힘
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              examples:
+                seatAlreadyHeld:
+                  summary: 다른 홀드가 만료 전이다
+                  value:
+                    code: SEAT_ALREADY_HELD
+                    message: 이미 홀드된 좌석입니다.
+                seatAlreadySold:
+                  summary: 이미 팔린 좌석이다
+                  value:
+                    code: SEAT_ALREADY_SOLD
+                    message: 이미 팔린 좌석입니다.
+
+  /holds/{hold_id}/confirm:
+    parameters:
+      - $ref: "#/components/parameters/HoldId"
+    post:
+      operationId: confirmBooking
+      tags: [holds]
+      summary: 모의 결제로 예매 확정 (US-04)
+      description: |
+        hold_id 로 확정할 홀드를 지정한다. 그 홀드를 만든 사용자가, 만료 전에만 확정할 수 있다.
+        모의 결제는 실제 결제 연동 없이 이 요청 하나로 처리한다.
+        성공하면 좌석은 SOLD 가 되고 다시 HELD/AVAILABLE 이 되지 않는다.
+      parameters:
+        - $ref: "#/components/parameters/XUserId"
+      responses:
+        "200":
+          description: 확정 성공. 좌석은 SOLD 다. (돌려줄 예매 리소스는 Q13에서 정한다)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Confirmation"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          description: 좌석·홀드 상태와 부딪힘
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              examples:
+                holdExpired:
+                  summary: 홀드가 만료됐거나, 만료 뒤 다른 홀드로 대체됐다
+                  value:
+                    code: HOLD_EXPIRED
+                    message: 홀드가 만료되었습니다.
+                seatAlreadySold:
+                  summary: 좌석이 이미 팔렸다
+                  value:
+                    code: SEAT_ALREADY_SOLD
+                    message: 이미 팔린 좌석입니다.
+
+components:
+  parameters:
+    PerformanceId:
+      name: performance_id
+      in: path
+      required: true
+      schema:
+        type: string
+      example: P1
+    SeatId:
+      name: seat_id
+      in: path
+      required: true
+      description: 공연 안에서의 좌석 ID
+      schema:
+        type: string
+      example: A1
+    HoldId:
+      name: hold_id
+      in: path
+      required: true
+      description: 홀드 응답에서 받은 ID. 다시 홀드하면 새 ID가 생긴다.
+      schema:
+        type: string
+    XUserId:
+      name: X-User-Id
+      in: header
+      required: true
+      description: 모의 사용자 ID. 없으면 401 UNAUTHORIZED.
+      schema:
+        type: string
+      example: u1
+
+  responses:
+    Unauthorized:
+      description: X-User-Id 헤더 없음
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            code: UNAUTHORIZED
+            message: X-User-Id 헤더가 필요합니다.
+
+  schemas:
+    Error:
+      type: object
+      description: 모든 오류 응답의 본문. 정확히 code, message 두 칸이다.
+      required: [code, message]
+      additionalProperties: false
+      properties:
+        code:
+          type: string
+          enum:
+            - UNAUTHORIZED
+            - NOT_FOUND
+            - SEAT_ALREADY_HELD
+            - SEAT_ALREADY_SOLD
+            - HOLD_EXPIRED
+        message:
+          type: string
+          description: 사람이 읽는 설명. 클라이언트는 내용에 의존하지 않는다.
+
+    SeatStatus:
+      type: string
+      enum: [AVAILABLE, HELD, SOLD]
+
+    Performance:
+      type: object
+      required: [id, title]
+      additionalProperties: false
+      properties:
+        id:
+          type: string
+          example: P1
+        title:
+          type: string
+          example: 공연 A
+
+    PerformanceList:
+      type: object
+      required: [performances]
+      additionalProperties: false
+      properties:
+        performances:
+          type: array
+          items:
+            $ref: "#/components/schemas/Performance"
+
+    Seat:
+      type: object
+      required: [seat_id, status]
+      additionalProperties: false
+      properties:
+        seat_id:
+          type: string
+          example: A1
+        status:
+          $ref: "#/components/schemas/SeatStatus"
+
+    SeatMap:
+      type: object
+      required: [performance_id, seats]
+      additionalProperties: false
+      properties:
+        performance_id:
+          type: string
+          example: P1
+        seats:
+          type: array
+          items:
+            $ref: "#/components/schemas/Seat"
+
+    Hold:
+      type: object
+      required: [hold_id, performance_id, seat_id, expires_at]
+      additionalProperties: false
+      properties:
+        hold_id:
+          type: string
+        performance_id:
+          type: string
+          example: P1
+        seat_id:
+          type: string
+          example: A1
+        expires_at:
+          type: string
+          format: date-time
+          description: 홀드 시각 + 300초. UTC, 초 단위, 끝이 Z.
+          example: "2026-12-01T10:05:00Z"
+
+    Confirmation:
+      type: object
+      required: [hold_id, performance_id, seat_id, status]
+      additionalProperties: false
+      properties:
+        hold_id:
+          type: string
+        performance_id:
+          type: string
+          example: P1
+        seat_id:
+          type: string
+          example: A1
+        status:
+          type: string
+          const: SOLD

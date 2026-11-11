@@ -1,5 +1,6 @@
 {
   "files": {
+    "tests/contract/test_openapi.py": "536aa6818e13673f8fc8df768ab35f1989494a7187bf0fcb251122ee25ffc5e0",
     "tests/test_smoke.py": "09b57af9eb9c82a19795528b996df79f0a63afe8ae1c75b0ac38fc9b853aa6ad"
   }
 }
