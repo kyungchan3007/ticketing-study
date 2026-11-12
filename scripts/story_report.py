@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """스토리별 통과·실패 개수를 표로 출력한다.
 
-사용: uv run python scripts/story_report.py [pytest 경로 ...]   (기본 tests/contract)
+사용: uv run python scripts/story_report.py [pytest 경로 ...]   (기본 tests/contract, tests/api)
 테스트 이름 test_us<NN>_... 에서 스토리를 읽는다.
 [열린 질문]이 붙어 테스트를 만들지 않은 인수 조건은 docs/stories 에서 읽어 목록으로 보여 준다.
 실패가 하나라도 있으면 종료 코드 1.
@@ -61,7 +61,7 @@ def skipped_acs() -> list[str]:
 
 
 def main() -> int:
-    targets = sys.argv[1:] or ["tests/contract"]
+    targets = sys.argv[1:] or [t for t in ("tests/contract", "tests/api") if (ROOT / t).is_dir()]
     table: "OrderedDict[str, dict[str, int]]" = OrderedDict(
         (k, {"passed": 0, "failed": 0, "skipped": 0}) for k in ("US-01", "US-02", "US-03", "US-04")
     )

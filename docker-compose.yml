@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: tkt
+      POSTGRES_PASSWORD: tkt
+      POSTGRES_DB: tkt
+    ports:
+      - "5432:5432"
+    volumes:
+      - tkt-pgdata:/var/lib/postgresql/data
+      - ./backend/docker/init-db.sql:/docker-entrypoint-initdb.d/01-init-db.sql:ro
+    healthcheck:
+      # 초기화 중 임시 서버를 ready 로 오인하지 않도록 tkt_test 에 실제로 질의한다.
+      test: ["CMD-SHELL", "psql -U tkt -d tkt_test -tAc 'select 1' | grep -q 1"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+volumes:
+  tkt-pgdata:

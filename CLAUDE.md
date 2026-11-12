@@ -12,10 +12,10 @@
 ## 작업 범위
 - 부탁받은 범위만 한다. 끝나면 결과를 보고하고 멈춘다. 다음 단계(기술 스택, 구현 방식, 다음 작업)는 사람이 정할 때까지 미리 논의하거나 진행하지 않는다. 필요해 보이면 보고 끝에 한 줄로 제안만 한다.
 
-## 순서: 테스트 먼저(RED) → 구현(GREEN)
-1. test가 요구사항 테스트를 작성하고, 실패(RED)하는 것을 확인한다.
+## 순서: 테스트 먼저(FAIL) → 구현(PASS)
+1. test가 요구사항 테스트를 작성하고, 실패(FAIL)하는 것을 확인한다.
 2. lead가 `python3 scripts/verify_tests.py record`로 테스트 해시를 기록한다.
-3. server가 테스트를 고치지 않고 `backend/`만 구현해서 통과(GREEN)시킨다.
+3. server가 테스트를 고치지 않고 `backend/`만 구현해서 통과(PASS)시킨다.
 4. lead가 `python3 scripts/verify_tests.py check`로 테스트가 바뀌지 않았는지 확인한 뒤 review에 넘긴다.
 - 테스트 실행: `uv sync`로 환경을 맞춘 뒤 `uv run pytest`로 돌린다(개발 의존성은 루트 `pyproject.toml`).
 

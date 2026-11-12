@@ -12,5 +12,30 @@
         ]
       }
     ]
+  },
+  "permissions": {
+    "deny": [
+      "Bash(git commit *)",
+      "Bash(git push *)",
+      "Bash(sudo *)",
+      "Bash(rm -rf *)",
+      "Bash(rm -fr *)",
+      "Bash(rm -Rf *)",
+      "Bash(rm -fR *)",
+      "Bash(rm -r -f *)",
+      "Bash(rm -f -r *)",
+      "Bash(sh)",
+      "Bash(sh -)",
+      "Bash(sh -s *)",
+      "Bash(bash)",
+      "Bash(bash -)",
+      "Bash(bash -s *)",
+      "Bash(zsh)",
+      "Bash(zsh -)",
+      "Bash(zsh -s *)",
+      "Read(~/.ssh/**)",
+      "Read(**/.env)",
+      "Read(**/.env.*)"
+    ]
   }
 }
