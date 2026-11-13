@@ -21,6 +21,7 @@
 - 2026-11-12 (server) alembic.ini 없이 db.migrate()가 Alembic 설정을 코드로 만들고, env.py에서 pg_advisory_lock으로 동시 migrate를 직렬화 — 루트 설정 파일을 늘리지 않으려고.
 - 2026-11-12 (server) seed.reset은 TRUNCATE 대신 자식 테이블부터 DELETE — 열린 앱 연결과의 잠금 대기를 피하려고.
 - 2026-11-12 (server) 계약에 없는 오류: 남의 홀드 확정 403 FORBIDDEN(Q3), 없는 hold_id 404 NOT_FOUND(Q4), 요청 형식 오류 400 VALIDATION_ERROR(Q9), 없는 경로 404·405 — 모두 {code, message} 형식. 열린 질문의 임시 처리이며 계약 enum에는 아직 없음.
+- 2026-11-12 (server) [임시 Q10] X-User-Id가 공백뿐이면 401 — require_user에서 strip() 후 빈 값을 헤더 없음과 같게 봄. (섹션 2에서 기록 누락, #17 지적 C)
 - 2026-11-12 (lead) 시각 접점 변경: Depends(get_now)·dependency_overrides 대신 서버가 잠금 뒤 clock.get_now()를 부르고 테스트는 monkeypatch로 바꿔 끼움 — 의존성은 잠금 전에 풀려 만료 판단이 잠금 대기 전 시각으로 됐기 때문(T-03 리뷰 #1).
 - 2026-11-12 (lead) 잠금 대기 재현용 backend.seed.lock_seat 추가 — 테스트 전용 HTTP 경로 없이 잠금 경쟁을 결정적으로 재현하려고.
 - 2026-11-12 (test) 잠금 대기 재현은 pg_stat_activity에서 wait_event_type='Lock'을 확인한 뒤 시각을 바꿈 — sleep 추측이 아니라 실제 대기를 확인하려고.
