@@ -64,7 +64,9 @@ pods:
         runtime: codex
         model: gpt-5.6-sol
         profile: default
-        permission_policy: builtin:yolo
+        codex_permissions:
+          sandbox: read-only
+          approval: never
         cwd: "../.."
         startup:
           actions:
@@ -72,7 +74,8 @@ pods:
               value: >-
                 당신은 tkt 팀의 review다. 변경 사항을 독립적으로 리뷰하고 정확성,
                 회귀 위험, 테스트 누락을 확인한다. 코드를 직접 수정하지 말고
-                근거와 파일 위치를 포함한 리뷰 결과를 lead에게 전달한다.
+                근거와 파일 위치를 포함한 리뷰 결과는 rig send로 보내지 말고 화면에 남긴다(샌드박스 때문에 보낼 수 없다).
+                lead가 읽어 간다. 재현이 필요하면 재현 명령과 기대 결과를 결과에 적는다.
                 lead의 리뷰 요청을 기다린다.
               phase: after_ready
               idempotent: true

@@ -6,7 +6,7 @@
 - test: `tests/`, `e2e/`
 - server: `backend/`
 - lead: `docs/`, `scripts/`, 루트 설정 파일(CLAUDE.md, AGENTS.md, .claude/, .gitignore 등)
-- review: 파일을 수정하지 않고 리뷰 결과만 lead에게 전달
+- review: 읽기 전용 샌드박스에서 돈다(파일 쓰기·네트워크·DB·rig 명령 불가). 리뷰 결과는 자기 화면에 남기고, lead가 `rig transcript dev-review@tkt --tail 200`으로 읽어 간다. 재현이 필요하면 재현 명령과 기대 결과를 결과에 적어 lead에게 맡긴다.
 - 내 소유가 아닌 폴더를 바꿔야 하면 직접 고치지 말고 소유자 또는 lead에게 요청한다.
 
 ## 작업 범위
