@@ -1,3 +1,4 @@
+import logging
 import uuid
 import weakref
 from datetime import datetime, timedelta, timezone
@@ -14,6 +15,8 @@ from backend.db import database_url, make_engine
 from backend.models import Booking, Hold, Performance, Seat
 
 HOLD_SECONDS = 300
+
+logger = logging.getLogger("backend")
 
 
 class ApiError(Exception):
@@ -54,6 +57,12 @@ def create_app() -> FastAPI:
     async def _http_error(_: Request, exc: StarletteHTTPException):
         codes = {404: "NOT_FOUND", 405: "METHOD_NOT_ALLOWED"}
         return error_response(exc.status_code, codes.get(exc.status_code, "HTTP_ERROR"), "요청을 처리할 수 없습니다.")
+
+    @app.exception_handler(Exception)
+    async def _unhandled_error(request: Request, exc: Exception):
+        # 원인은 서버 로그에만 남기고, 응답 message 에는 내부 정보를 넣지 않는다.
+        logger.error("처리하지 못한 예외: %s %s", request.method, request.url.path, exc_info=exc)
+        return error_response(500, "INTERNAL_ERROR", "서버 내부 오류가 발생했습니다.")
 
     def session_of(request: Request) -> Session:
         return Session(request.app.state.engine)

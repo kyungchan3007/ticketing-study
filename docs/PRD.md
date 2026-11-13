@@ -53,6 +53,7 @@ AVAILABLE ──홀드──▶ HELD ──모의 결제 확정──▶ SOLD
 | 409 | `SEAT_ALREADY_HELD` | 다른 홀드가 만료 전인 좌석을 홀드하려 함 |
 | 409 | `SEAT_ALREADY_SOLD` | SOLD 좌석을 홀드하거나 확정하려 함 |
 | 409 | `HOLD_EXPIRED` | 만료된 홀드로 확정하려 함 |
+| 500 | `INTERNAL_ERROR` | 서버가 처리하지 못한 오류(예: DB 연결 끊김). `message`에 내부 정보(예외 이름, DB 주소·비밀번호)를 넣지 않는다 (#17 지적 A) |
 
 ## 6. 데이터와 스택
 - **스택:** Python, FastAPI, PostgreSQL.

@@ -370,3 +370,19 @@ def test_us04_ac04_7_confirm_requires_user():
     _, _, op, pp = find_op(spec, "confirmBooking")
     assert_user_header(op, pp, need=True)
     assert_error(op, "401", "UNAUTHORIZED")
+
+
+# ---------------------------------------------------------------- 공통: 처리하지 못한 예외(T-13)
+@pytest.mark.parametrize("operation_id", ["listPerformances", "getSeatMap", "holdSeat", "confirmBooking"])
+def test_internal_error_500_declared_as_error_schema(operation_id):
+    """공통(T-13): 모든 operation 에 500 응답이 {code, message} 오류 스키마이고 code INTERNAL_ERROR 로 명시돼 있다"""
+    spec = load_spec()
+    _, _, op, _ = find_op(spec, operation_id)
+    assert_error(op, "500", "INTERNAL_ERROR")
+
+
+def test_internal_error_code_in_error_schema_enum():
+    """공통(T-13): components.schemas.Error 의 code enum 에 INTERNAL_ERROR 가 있다"""
+    spec = load_spec()
+    code = props(deref(spec, spec["components"]["schemas"]["Error"]))["code"]
+    assert "INTERNAL_ERROR" in code.get("enum", []), f"Error.code enum 에 INTERNAL_ERROR 가 없다: {code.get('enum')}"

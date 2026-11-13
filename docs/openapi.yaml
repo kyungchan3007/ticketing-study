@@ -39,6 +39,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/PerformanceList"
+        "500":
+          $ref: "#/components/responses/InternalError"
 
   /performances/{performance_id}/seats:
     parameters:
@@ -66,6 +68,8 @@ paths:
               example:
                 code: NOT_FOUND
                 message: 공연을 찾을 수 없습니다.
+        "500":
+          $ref: "#/components/responses/InternalError"
 
   /performances/{performance_id}/seats/{seat_id}/hold:
     parameters:
@@ -115,6 +119,8 @@ paths:
                   value:
                     code: SEAT_ALREADY_SOLD
                     message: 이미 팔린 좌석입니다.
+        "500":
+          $ref: "#/components/responses/InternalError"
 
   /holds/{hold_id}/confirm:
     parameters:
@@ -155,6 +161,8 @@ paths:
                   value:
                     code: SEAT_ALREADY_SOLD
                     message: 이미 팔린 좌석입니다.
+        "500":
+          $ref: "#/components/responses/InternalError"
 
 components:
   parameters:
@@ -199,6 +207,15 @@ components:
           example:
             code: UNAUTHORIZED
             message: X-User-Id 헤더가 필요합니다.
+    InternalError:
+      description: "서버가 처리하지 못한 오류(예: DB 연결 끊김). message에 내부 정보(예외 이름, DB 주소)를 넣지 않는다."
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            code: INTERNAL_ERROR
+            message: 서버 내부 오류가 발생했습니다.
 
   schemas:
     Error:
@@ -215,6 +232,7 @@ components:
             - SEAT_ALREADY_HELD
             - SEAT_ALREADY_SOLD
             - HOLD_EXPIRED
+            - INTERNAL_ERROR
         message:
           type: string
           description: 사람이 읽는 설명. 클라이언트는 내용에 의존하지 않는다.
