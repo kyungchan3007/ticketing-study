@@ -7,6 +7,9 @@
     "tests/api/test_us03_hold_seat.py": "9505f944cab43d7f85d051d70ac1089937f977bd88eb239695fe380fce8f0085",
     "tests/api/test_us04_confirm_booking.py": "879e804c043bde6286524966b2077b5458453b6bd0383e5648a9650694b8f949",
     "tests/capacity/test_capacity.py": "a30a9c2dc7d64d28bd63efad93d723b2957577d837813fadeaa31d63f53a3e21",
+    "tests/concurrency/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "tests/concurrency/conftest.py": "e32912f9e3eab565c0b5fc62203d7829e1740c4abb2f653028ee8556fcb8a115",
+    "tests/concurrency/test_concurrency.py": "91f06108e9f885ebadac5121c68f373f833e0a5a76d077947f514c49bf941c17",
     "tests/contract/test_openapi.py": "a8ae0cd598960ae78b30d1579101cc5460888b4f8b3536bc7967eefdfcc42056",
     "tests/test_smoke.py": "09b57af9eb9c82a19795528b996df79f0a63afe8ae1c75b0ac38fc9b853aa6ad"
   }

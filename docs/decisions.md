@@ -40,3 +40,10 @@
 - 2026-11-13 (lead) 처리하지 못한 예외는 500 `INTERNAL_ERROR`, message에 내부 정보(예외 이름, DB 주소·비밀번호)를 넣지 않음 — PRD 5절 "모든 오류는 {code, message}"를 지키고 내부 구성이 밖으로 새지 않게(#17 지적 A). PRD 5절·계약에 반영.
 - 2026-11-13 (test) 500 테스트 이름은 `test_internal_error_*`(story_report의 US 집계 밖), message 누출 금지어는 비밀번호·호스트·DB명·사용자·OperationalError/psycopg/sqlalchemy/Traceback — 스토리가 아니라 PRD 5절 공통 규칙이라서, 그리고 실제로 샐 수 있는 내부 정보를 구체적으로 막으려고.
 - 2026-11-13 (server) 500 message 문구는 고정 문장 "서버 내부 오류가 발생했습니다.", 원인은 logger.error(exc_info)로 서버 로그에만 — 지시에 문구가 없었고, 원인 추적은 로그로 하려고.
+- 2026-11-14 (lead) 동시 확정 테스트의 성공 코드는 지시문의 201이 아니라 계약의 confirmBooking 성공 코드 200 — 계약이 이미 200으로 정해져 있어서. 같은 사용자의 동시 확정에서 나머지는 409(사람 지시, Q1의 확정 동시 요청 부분).
+- 2026-11-14 (lead) 예매 표 UNIQUE는 새 마이그레이션 없이 기존 uq_bookings_seat 사용 — 0001부터 있고 테스트 DB에서 확인돼서. docs/concurrency.md는 server 측정값으로 lead가 씀 — docs/는 lead 소유라서.
+- 2026-11-14 (server) DB 연결 풀을 워커당 pool_size 10 + max_overflow 5로 줄임 — 워커 4 × 30 = 120이 max_connections 100을 넘어 동시 홀드 500건에서 too many clients 500이 났기 때문. 한도 식은 인스턴스 수 × 워커 수 × 15 ≤ max_connections(T-18 리뷰 #2).
+- 2026-11-14 (server) 홀드는 FOR UPDATE 방식(A)을 유지, 조건부 UPDATE(B)는 버림 — B는 잠금 대기 뒤 시각 판단 테스트에서 실패하고, 정확히 만들려면 컬럼·마이그레이션이 더 필요하며, 속도 차이는 범위가 겹칠 만큼 작아서. 비교는 워밍업 1회 뒤 10라운드 중앙값.
+- 2026-11-14 (test) 동시성 테스트는 자체 db_url 픽스처를 쓰고, 서버를 띄운 뒤 /performances를 20번 보내 워커 4개를 데움 — api 테스트 준비와 섞지 않고, 첫 요청이 워커 기동 시간에 묶이지 않게.
+- 2026-11-14 (lead) T-18 리뷰 #1(좌석맵이 두 SQL 문으로 읽음)은 바꾸지 않음 — 홀드 행은 바뀌지 않아 응답이 좌석을 읽은 순간의 상태와 같기 때문. #3(테스트하지 않은 경쟁)은 이번에 추가 안 함 — 다른 사용자의 확정은 Q3이고, 실제 서버에서는 시각을 바꿀 방법이 없으며 테스트 전용 경로는 만들지 않아서.
+- 2026-11-14 (lead) 서버 실행·벤치마크 DB를 tkt_server로 분리하고 DATABASE_URL 기본값도 tkt_server로 함, tkt(compose POSTGRES_DB)는 그대로 둠 — 벤치마크·실험이 테스트 DB(tkt_test)의 데이터를 지우거나 덮어쓰지 않게. 설정 변경이라 새 테스트 없이 기존 테스트로 확인.
