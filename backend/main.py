@@ -7,6 +7,7 @@ from fastapi import Depends, FastAPI, Header, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
@@ -31,6 +32,12 @@ def error_response(status: int, code: str, message: str) -> JSONResponse:
 
 def iso(value: datetime) -> str:
     return value.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def is_unique_booking_violation(exc: IntegrityError) -> bool:
+    """PostgreSQL 고유 위반(SQLSTATE 23505)이면서 제약 이름이 uq_bookings_seat 인 경우만 True."""
+    diag = getattr(exc.orig, "diag", None)
+    return getattr(exc.orig, "sqlstate", None) == "23505" and getattr(diag, "constraint_name", None) == "uq_bookings_seat"
 
 
 def require_user(x_user_id: str | None = Header(default=None)) -> str:
@@ -174,6 +181,13 @@ def create_app() -> FastAPI:
                     created_at=now,
                 )
             )
+            try:
+                session.flush()  # 예매 줄을 지금 넣어 UNIQUE 위반을 이 안에서 잡는다.
+            except IntegrityError as exc:
+                # uq_bookings_seat 위반(= 이미 팔린 좌석)만 409 로 바꾼다. 다른 제약·DB 오류는 그대로 올려 500 처리.
+                if is_unique_booking_violation(exc):
+                    raise ApiError(409, "SEAT_ALREADY_SOLD", "이미 팔린 좌석입니다.") from exc
+                raise
             return {
                 "hold_id": hold.hold_id,
                 "performance_id": hold.performance_id,
