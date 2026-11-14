@@ -6,7 +6,7 @@ HTTP 경로·상태 코드·오류 code는 `docs/openapi.yaml`이 정한다. 이
 ## 1. 앱
 - `backend/`는 파이썬 패키지다(`backend/__init__.py`). 루트에서 `import backend`가 된다(pytest `pythonpath = ["."]`).
 - `backend.main.create_app() -> fastapi.FastAPI`
-  - 호출할 때 환경변수 `DATABASE_URL`을 읽는다. 없으면 `postgresql+psycopg://tkt:tkt@localhost:5432/tkt`.
+  - 호출할 때 환경변수 `DATABASE_URL`을 읽는다. 없으면 `postgresql+psycopg://tkt:tkt@localhost:5432/tkt_server`.
 - `backend.main.app = create_app()` (uvicorn 진입점 `backend.main:app`).
 
 ## 2. 시각
@@ -31,7 +31,8 @@ HTTP 경로·상태 코드·오류 code는 `docs/openapi.yaml`이 정한다. 이
 
 ## 4. 테스트용 DB
 - `docker compose up -d --wait`로 루트 `docker-compose.yml`의 PostgreSQL을 띄운다(헬스체크 포함).
-- 개발 DB는 `tkt`, 테스트 DB는 `tkt_test`. compose가 처음 뜰 때 둘 다 만든다.
+- 서버 실행·벤치마크 DB는 `tkt_server`, 테스트 DB는 `tkt_test`. compose가 처음 뜰 때 둘 다 만든다(`tkt`는 compose 기본 DB로만 남는다). 테스트와 벤치마크가 동시에 돌아도 서로의 데이터를 지우지 않게 나눴다.
+- 벤치마크·실험은 `DATABASE_URL=postgresql+psycopg://tkt:tkt@localhost:5432/tkt_server`로 돌리고, `tkt_test`를 쓰지 않는다.
 - 테스트는 환경변수 `TEST_DATABASE_URL`(없으면 `postgresql+psycopg://tkt:tkt@localhost:5432/tkt_test`)을 쓰고, `create_app()` 전에 `DATABASE_URL`을 그 값으로 맞춘다.
 - DB에 연결할 수 없으면 테스트는 **건너뛰지 않고 실패**한다. 실패 메시지에 `docker compose up -d --wait`를 안내한다.
 

@@ -23,6 +23,9 @@
 - `docs/decisions.md`에는 lead만 적는다. lead는 결과를 통합할 때 모든 보고의 `정한 것`을 옮기고, 열린 질문의 임시 처리는 `[임시 Q번호]`를 붙인다.
 - lead의 최종 보고에는 `decisions.md 반영: N건`을 적는다.
 
+## 보고 형식
+- test는 테스트 결과를 표로 보고한다: 테스트 / 결과(FAIL·PASS) / 상태 코드 분포 / 소요 시간(전체, p95).
+
 ## 순서: 테스트 먼저(FAIL) → 구현(PASS)
 1. test가 요구사항 테스트를 작성하고, 실패(FAIL)하는 것을 확인한다.
 2. lead가 `python3 scripts/verify_tests.py record`로 테스트 해시를 기록한다.
