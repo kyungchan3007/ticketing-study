@@ -2,6 +2,7 @@
   "files": {
     "tests/api/conftest.py": "3020f431b35eadb1f5ca332077486abc859b1d423630f9faeaa597755d854316",
     "tests/api/test_internal_error.py": "c91ef9dd0dde196dd1f778378dab602bb0772e3940b1818027ad095913a7f336",
+    "tests/api/test_unique_violation.py": "a794ecd130af361c2af955d99aded6887c23a563ad40d837aee3c286515bee0a",
     "tests/api/test_us01_performance_list.py": "b7df25b8210bf70eb1facdf0190f971089a6779974b7a03ddeb0d0c6eb3257e1",
     "tests/api/test_us02_seat_map.py": "4905b4fbde0a79e805a8d5af1ca2ba93bfa26bcbed3e0502ee7222aeedb95214",
     "tests/api/test_us03_hold_seat.py": "9505f944cab43d7f85d051d70ac1089937f977bd88eb239695fe380fce8f0085",
