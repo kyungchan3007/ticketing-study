@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """스토리별 통과·실패 개수를 표로 출력한다.
 
-사용: uv run python scripts/story_report.py [pytest 경로 ...]   (기본 tests/contract, tests/api)
+사용: uv run python scripts/story_report.py [pytest 경로 ...]   (기본 tests/contract, tests/api, tests/concurrency)
 테스트 이름 test_us<NN>_... 에서 스토리를 읽는다.
 [열린 질문]이 붙어 테스트를 만들지 않은 인수 조건은 docs/stories 에서 읽어 목록으로 보여 준다.
 실패가 하나라도 있으면 종료 코드 1.
@@ -18,6 +18,8 @@ from collections import OrderedDict
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+# docs/stories 의 US-*.md 에서 스토리 목록을 읽는다(새 스토리를 쓰면 표에 바로 줄이 생긴다).
+STORIES = sorted(f.name[:5] for f in (ROOT / "docs" / "stories").glob("US-*.md"))
 
 
 def run_pytest(targets: list[str]) -> list[tuple[str, str]]:
@@ -61,14 +63,14 @@ def skipped_acs() -> list[str]:
 
 
 def main() -> int:
-    targets = sys.argv[1:] or [t for t in ("tests/contract", "tests/api") if (ROOT / t).is_dir()]
+    targets = sys.argv[1:] or [t for t in ("tests/contract", "tests/api", "tests/concurrency") if (ROOT / t).is_dir()]
     table: "OrderedDict[str, dict[str, int]]" = OrderedDict(
-        (k, {"passed": 0, "failed": 0, "skipped": 0}) for k in ("US-01", "US-02", "US-03", "US-04")
+        (k, {"passed": 0, "failed": 0, "skipped": 0}) for k in STORIES
     )
     for name, outcome in run_pytest(targets):
         g = group_of(name)
         if g is not None:
-            table[g][outcome] += 1
+            table.setdefault(g, {"passed": 0, "failed": 0, "skipped": 0})[outcome] += 1
 
     print(f"{'스토리':<8}{'통과':>6}{'실패':>6}{'건너뜀':>8}{'합계':>6}")
     print("-" * 34)

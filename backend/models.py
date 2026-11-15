@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, ForeignKeyConstraint, Integer, String, UniqueConstraint
+from sqlalchemy import DateTime, ForeignKey, ForeignKeyConstraint, Index, Integer, String, UniqueConstraint, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -44,16 +44,32 @@ class Hold(Base):
 
 
 class Booking(Base):
-    """확정 기록. 좌석당 한 줄만 들어갈 수 있다(UNIQUE) — 이중 판매에 대한 마지막 안전망."""
+    """예매 한 줄(결제 두 단계). 한 홀드에 여러 줄일 수 있다(실패 뒤 새 키로 다시 요청).
+
+    제약(0002 마이그레이션이 만든다)
+    - uq_bookings_seat: 좌석당 PAID 한 줄(부분 UNIQUE). 이중 판매의 마지막 방어선.
+    - uq_bookings_active_hold: 홀드당 PENDING·PAID 한 줄(부분 UNIQUE).
+    - uq_bookings_user_key: (user_id, idempotency_key) UNIQUE.
+    """
 
     __tablename__ = "bookings"
     __table_args__ = (
-        UniqueConstraint("performance_id", "seat_id", name="uq_bookings_seat"),
+        Index("uq_bookings_seat", "performance_id", "seat_id", unique=True, postgresql_where=text("status = 'PAID'")),
+        Index(
+            "uq_bookings_active_hold",
+            "hold_id",
+            unique=True,
+            postgresql_where=text("status IN ('PENDING', 'PAID')"),
+        ),
+        UniqueConstraint("user_id", "idempotency_key", name="uq_bookings_user_key"),
         ForeignKeyConstraint(["performance_id", "seat_id"], ["seats.performance_id", "seats.seat_id"]),
     )
 
-    hold_id: Mapped[str] = mapped_column(ForeignKey("holds.hold_id"), primary_key=True)
+    booking_id: Mapped[str] = mapped_column(String, primary_key=True)
+    hold_id: Mapped[str] = mapped_column(ForeignKey("holds.hold_id"), nullable=False)
     performance_id: Mapped[str] = mapped_column(String, nullable=False)
     seat_id: Mapped[str] = mapped_column(String, nullable=False)
     user_id: Mapped[str] = mapped_column(String, nullable=False)
+    status: Mapped[str] = mapped_column(String, nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

@@ -43,3 +43,16 @@ uv sync
 uv run pytest
 uv run python scripts/story_report.py
 ```
+
+## 6. 결제 두 단계(6장)에서 test와 server가 같이 보는 DB 사실
+테스트가 DB를 직접 읽거나 넣을 때(예: UNIQUE 위반 재현, 예매 개수 확인) 기대어도 되는 것은 아래뿐이다. 나머지 열·표·인덱스는 server가 정한다.
+- `bookings` 표: 한 줄이 예매 하나다. 열 `booking_id`(기본 키), `hold_id`(`holds` 참조), `performance_id`, `seat_id`, `user_id`, `status`(`PENDING`·`PAID`·`FAILED`·`REFUND_REQUIRED`), `idempotency_key`, `created_at`.
+  - 한 홀드에 예매가 여러 줄일 수 있다(실패 뒤 새 키로 다시 요청).
+- 제약
+  - `uq_bookings_seat`: (`performance_id`, `seat_id`) 중 `status = 'PAID'`인 줄은 하나뿐(부분 UNIQUE). 이중 판매의 마지막 방어선이다.
+  - `uq_bookings_active_hold`: `hold_id` 중 `status IN ('PENDING','PAID')`인 줄은 하나뿐(부분 UNIQUE).
+  - `uq_bookings_user_key`: (`user_id`, `idempotency_key`) UNIQUE.
+- `seats.status`는 지금처럼 `AVAILABLE`·`HELD`·`SOLD`이고, 결제 대기 중에도 `HELD`다.
+- `backend.seed.reset`은 지금처럼 예매·홀드·좌석·공연을 모두 지운다.
+- 마이그레이션은 `0002`로 추가하고 `downgrade`로 `0001`에 돌아갈 수 있어야 한다.
+- 시각은 콜백 처리에서도 좌석 잠금 뒤 `clock.get_now()`로 한 번 읽는다.

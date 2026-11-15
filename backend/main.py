@@ -2,10 +2,12 @@ import logging
 import uuid
 import weakref
 from datetime import datetime, timedelta, timezone
+from typing import Literal
 
 from fastapi import Depends, FastAPI, Header, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -34,16 +36,47 @@ def iso(value: datetime) -> str:
     return value.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def is_unique_booking_violation(exc: IntegrityError) -> bool:
-    """PostgreSQL 고유 위반(SQLSTATE 23505)이면서 제약 이름이 uq_bookings_seat 인 경우만 True."""
+def is_unique_violation(exc: IntegrityError, constraint: str) -> bool:
+    """PostgreSQL 고유 위반(SQLSTATE 23505)이면서 제약(또는 유일 인덱스) 이름이 constraint 인 경우만 True."""
     diag = getattr(exc.orig, "diag", None)
-    return getattr(exc.orig, "sqlstate", None) == "23505" and getattr(diag, "constraint_name", None) == "uq_bookings_seat"
+    return getattr(exc.orig, "sqlstate", None) == "23505" and getattr(diag, "constraint_name", None) == constraint
+
+
+def booking_json(booking: Booking) -> dict:
+    return {
+        "booking_id": booking.booking_id,
+        "hold_id": booking.hold_id,
+        "performance_id": booking.performance_id,
+        "seat_id": booking.seat_id,
+        "status": booking.status,
+    }
+
+
+class PaymentCallbackBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    result: Literal["SUCCEEDED", "FAILED"]
+
+
+USER_ID_MAX_LENGTH = 255  # 계약(openapi XUserId maxLength)과 같다. 문자 수 기준, 앞뒤 공백을 뗀 값.
 
 
 def require_user(x_user_id: str | None = Header(default=None)) -> str:
-    if x_user_id is None or not x_user_id.strip():
+    # 없음·공백뿐·너무 긺은 모두 같은 401 이다(긴 값이 (user_id, idempotency_key) 인덱스 한도를 넘지 않게).
+    user_id = x_user_id.strip() if x_user_id is not None else ""
+    if not user_id or len(user_id) > USER_ID_MAX_LENGTH:
         raise ApiError(401, "UNAUTHORIZED", "X-User-Id 헤더가 필요합니다.")
-    return x_user_id.strip()
+    return user_id
+
+
+IDEMPOTENCY_KEY_MAX_LENGTH = 255  # 계약(openapi IdempotencyKey maxLength)과 같다. 문자 수 기준.
+
+
+def check_idempotency_key(idempotency_key: str | None) -> str:
+    if idempotency_key is None or not idempotency_key.strip():
+        raise ApiError(400, "VALIDATION_ERROR", "Idempotency-Key 헤더가 필요합니다.")
+    if len(idempotency_key) > IDEMPOTENCY_KEY_MAX_LENGTH:
+        raise ApiError(400, "VALIDATION_ERROR", f"Idempotency-Key 는 {IDEMPOTENCY_KEY_MAX_LENGTH}자 이하여야 합니다.")
+    return idempotency_key
 
 
 def create_app() -> FastAPI:
@@ -158,42 +191,94 @@ def create_app() -> FastAPI:
         hold_id: str,
         request: Request,
         user_id: str = Depends(require_user),
+        idempotency_key: str | None = Header(default=None),
     ):
+        """예매 요청: 결제 대기(PENDING) 예매를 만들거나 이미 있는 같은 예매를 돌려준다. 좌석은 바꾸지 않는다."""
+        # 요청 형식 검사(401 → 400)를 DB 조회보다 먼저 한다.
+        idempotency_key = check_idempotency_key(idempotency_key)
         with session_of(request) as session, session.begin():
-            hold = session.get(Hold, hold_id)
+            hold = session.get(Hold, hold_id)  # 홀드 행은 만들어진 뒤 바뀌지 않는다
             if hold is None:
                 raise ApiError(404, "NOT_FOUND", "홀드를 찾을 수 없습니다.")
+            # 같은 홀드(=같은 좌석)에 대한 모든 요청을 이 좌석 행 잠금으로 한 줄로 세운다.
             seat = lock_seat(session, hold.performance_id, hold.seat_id)
             now = clock.get_now()  # 잠금 뒤에 한 번만 읽는다.
+            same_key = session.scalars(
+                select(Booking).where(Booking.user_id == user_id, Booking.idempotency_key == idempotency_key)
+            ).one_or_none()
+            if same_key is not None:
+                if same_key.hold_id == hold.hold_id:
+                    return booking_json(same_key)
+                raise ApiError(409, "IDEMPOTENCY_KEY_REUSED", "이미 다른 요청에 쓴 Idempotency-Key 입니다.")
+            if hold.user_id == user_id:
+                # 본인의 같은 홀드에 결제 대기·완료 예매가 있으면 SOLD·만료 판정보다 먼저 그 예매를 돌려준다.
+                active = session.scalars(
+                    select(Booking)
+                    .where(Booking.hold_id == hold.hold_id, Booking.status.in_(("PENDING", "PAID")))
+                    .order_by(Booking.created_at)
+                ).first()
+                if active is not None:
+                    return booking_json(active)
             if seat.status == "SOLD":
                 raise ApiError(409, "SEAT_ALREADY_SOLD", "이미 팔린 좌석입니다.")
             if hold.user_id != user_id:
                 raise ApiError(403, "FORBIDDEN", "다른 사용자의 홀드입니다.")
             if seat.current_hold_id != hold.hold_id or now >= hold.expires_at:
                 raise ApiError(409, "HOLD_EXPIRED", "홀드가 만료되었습니다.")
-            seat.status = "SOLD"
-            session.add(
-                Booking(
-                    hold_id=hold.hold_id,
-                    performance_id=hold.performance_id,
-                    seat_id=hold.seat_id,
-                    user_id=user_id,
-                    created_at=now,
-                )
+            booking = Booking(
+                booking_id=uuid.uuid4().hex,
+                hold_id=hold.hold_id,
+                performance_id=hold.performance_id,
+                seat_id=hold.seat_id,
+                user_id=user_id,
+                status="PENDING",
+                idempotency_key=idempotency_key,
+                created_at=now,
             )
+            session.add(booking)
             try:
-                session.flush()  # 예매 줄을 지금 넣어 UNIQUE 위반을 이 안에서 잡는다.
+                session.flush()
             except IntegrityError as exc:
-                # uq_bookings_seat 위반(= 이미 팔린 좌석)만 409 로 바꾼다. 다른 제약·DB 오류는 그대로 올려 500 처리.
-                if is_unique_booking_violation(exc):
-                    raise ApiError(409, "SEAT_ALREADY_SOLD", "이미 팔린 좌석입니다.") from exc
+                # 다른 좌석(=다른 홀드)에 같은 키를 동시에 쓴 경우: 잠금이 달라 둘 다 통과했다가 여기서 하나가 진다.
+                if is_unique_violation(exc, "uq_bookings_user_key"):
+                    raise ApiError(409, "IDEMPOTENCY_KEY_REUSED", "이미 다른 요청에 쓴 Idempotency-Key 입니다.") from exc
                 raise
-            return {
-                "hold_id": hold.hold_id,
-                "performance_id": hold.performance_id,
-                "seat_id": hold.seat_id,
-                "status": "SOLD",
-            }
+            return booking_json(booking)
+
+    @app.post("/payments/{booking_id}/callback")
+    def payment_callback(booking_id: str, body: PaymentCallbackBody, request: Request):
+        """모의 결제사의 결과 콜백. 시각은 좌석 잠금 뒤에 읽어 만료를 판단한다."""
+        with session_of(request) as session, session.begin():
+            booking = session.get(Booking, booking_id)
+            if booking is None:
+                raise ApiError(404, "NOT_FOUND", "예매를 찾을 수 없습니다.")
+            seat = lock_seat(session, booking.performance_id, booking.seat_id)
+            session.refresh(booking)  # 잠금을 기다리는 사이 다른 콜백이 끝냈을 수 있다
+            if booking.status != "PENDING":
+                return booking_json(booking)  # 끝난 예매는 무엇이 와도 바꾸지 않는다
+            now = clock.get_now()  # 잠금 뒤에 한 번만 읽는다.
+            if body.result == "FAILED":
+                booking.status = "FAILED"
+                return booking_json(booking)
+            hold = session.get(Hold, booking.hold_id)
+            sellable = (
+                seat.status != "SOLD" and seat.current_hold_id == booking.hold_id and now < hold.expires_at
+            )
+            if sellable:
+                try:
+                    with session.begin_nested():  # SAVEPOINT: 위반 때 이 부분만 되돌린다
+                        booking.status = "PAID"
+                        session.flush()
+                except IntegrityError as exc:
+                    # 이미 다른 PAID 줄이 있다 = 팔 수 없음. 다른 제약·DB 오류는 그대로 올려 500 처리.
+                    if not is_unique_violation(exc, "uq_bookings_seat"):
+                        raise
+                    sellable = False
+                else:
+                    seat.status = "SOLD"
+            if not sellable:
+                booking.status = "REFUND_REQUIRED"  # 좌석은 바꾸지 않는다
+            return booking_json(booking)
 
     return app
 

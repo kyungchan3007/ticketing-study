@@ -15,10 +15,10 @@ def test_us02_ac02_1_all_available_without_header(env):
 
 
 def test_us02_ac02_2_mixed_states(env):
-    """US-02 / AC-02-2: T0 u2 가 A1 홀드, u3 가 A2 홀드·확정 → T0+1분 좌석맵은 A1 HELD, A2 SOLD, A3 AVAILABLE"""
+    """US-02 / AC-02-2: T0 u2 가 A1 홀드, u3 가 A2 홀드·예매 요청·성공 콜백으로 SOLD → T0+1분 좌석맵은 A1 HELD, A2 SOLD, A3 AVAILABLE"""
     env.at(env.T0)
     env.hold_ok("u2", "A1")
-    env.confirm_ok("u3", env.hold_ok("u3", "A2"))
+    env.pay("u3", env.hold_ok("u3", "A2"))
     env.at(env.t(minutes=1))
     resp = env.seatmap("P1")
     assert resp.status_code == env.ok_status("getSeatMap"), resp.text

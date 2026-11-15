@@ -54,5 +54,7 @@ def test_internal_error_hold_seat_db_down(broken_client):
 
 
 def test_internal_error_confirm_booking_db_down(broken_client):
-    """공통(T-13): DB 에 연결할 수 없을 때 확정(X-User-Id 있음)은 500 JSON {code: INTERNAL_ERROR, message}, 내부 정보 없음"""
-    assert_internal_error(broken_client.post("/holds/h1/confirm", headers={"X-User-Id": "u1"}))
+    """공통(T-13): DB 에 연결할 수 없을 때 예매 요청(X-User-Id·Idempotency-Key 있음)은 500 JSON {code: INTERNAL_ERROR, message}, 내부 정보 없음"""
+    assert_internal_error(
+        broken_client.post("/holds/h1/confirm", headers={"X-User-Id": "u1", "Idempotency-Key": "k1"})
+    )
