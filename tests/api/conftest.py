@@ -3,6 +3,8 @@
 - 앱: backend.main.create_app()   시각: monkeypatch.setattr(backend.clock, "get_now", ...)
 - 데이터: backend.seed.reset(url, performances)   DB 준비: backend.db.migrate(url)
 - 경로·성공 코드·본문 형태는 docs/openapi.yaml 에서 읽는다(operationId 로 찾는다).
+- DB 를 직접 볼 때는 docs/tasks/api-harness.md 6절의 표·열·제약(bookings: booking_id, hold_id, performance_id,
+  seat_id, user_id, status, idempotency_key, created_at)에만 기댄다.
 - backend 가 없거나 DB 에 연결할 수 없으면 건너뛰지 않고 실패한다.
 """
 
@@ -11,11 +13,13 @@ from __future__ import annotations
 import os
 import threading
 import time
+import uuid
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import jsonschema
+import psycopg
 import pytest
 import yaml
 from fastapi.testclient import TestClient
@@ -29,6 +33,7 @@ PERFORMANCES = [
     {"id": "P2", "title": "공연 B", "seats": ["B1"]},
 ]
 USERS = [f"u{i}" for i in range(1, 11)]
+AUTO = object()  # confirm(key=AUTO): 호출마다 새 Idempotency-Key 를 만든다. key=None 이면 헤더를 보내지 않는다.
 
 
 def _operation(operation_id: str):
@@ -67,10 +72,35 @@ class Env:
     def new_client(self) -> TestClient:
         return TestClient(self.app)
 
-    def request(self, operation_id, *, user=None, client=None, json=None, **path_params):
+    def request(self, operation_id, *, user=None, client=None, json=None, headers=None, **path_params):
         path, method, _ = _operation(operation_id)
-        headers = {"X-User-Id": user} if user is not None else {}
-        return (client or self.client).request(method.upper(), path.format(**path_params), headers=headers, json=json)
+        all_headers = {"X-User-Id": user} if user is not None else {}
+        all_headers.update(headers or {})
+        return (client or self.client).request(
+            method.upper(), path.format(**path_params), headers=all_headers, json=json
+        )
+
+    def key(self) -> str:
+        """이 테스트에서 아직 안 쓴 Idempotency-Key."""
+        return f"key-{uuid.uuid4().hex}"
+
+    # ---- DB 를 직접 본다·만든다 (api-harness 6절의 표·열만 쓴다)
+    def sql(self, query, args=()):
+        with psycopg.connect(self.url.replace("postgresql+psycopg", "postgresql"), autocommit=True) as conn:
+            cur = conn.execute(query, args)
+            return cur.fetchall() if cur.description else None
+
+    def booking_rows(self, *, hold_id=None, seat="A1", perf="P1", statuses=None):
+        """예매 줄 (booking_id, hold_id, user_id, status) 목록. hold_id 를 주면 그 홀드, 아니면 그 좌석의 줄."""
+        where, args = ("hold_id = %s", [hold_id]) if hold_id else ("performance_id = %s and seat_id = %s", [perf, seat])
+        if statuses:
+            where += " and status = any(%s)"
+            args.append(list(statuses))
+        return self.sql(f"select booking_id, hold_id, user_id, status from bookings where {where} order by created_at, booking_id", args)
+
+    def booking_status(self, booking_id):
+        rows = self.sql("select status from bookings where booking_id = %s", (booking_id,))
+        return rows[0][0] if rows else None
 
     def ok_status(self, operation_id) -> int:
         _, _, op = _operation(operation_id)
@@ -93,8 +123,15 @@ class Env:
     def hold(self, user, seat="A1", perf="P1", client=None):
         return self.request("holdSeat", user=user, client=client, performance_id=perf, seat_id=seat)
 
-    def confirm(self, user, hold_id, client=None):
-        return self.request("confirmBooking", user=user, client=client, hold_id=hold_id)
+    def confirm(self, user, hold_id, key=AUTO, client=None):
+        """예매 요청. key=AUTO 는 새 키, key=None 은 Idempotency-Key 헤더 없음."""
+        headers = {} if key is None else {"Idempotency-Key": self.key() if key is AUTO else key}
+        return self.request("confirmBooking", user=user, client=client, hold_id=hold_id, headers=headers)
+
+    def callback(self, booking_id, result="SUCCEEDED", client=None, body=AUTO):
+        """모의 결제사 콜백. body 를 주면 그대로 보낸다(None 이면 본문 없음)."""
+        payload = {"result": result} if body is AUTO else body
+        return self.request("paymentCallback", client=client, json=payload, booking_id=booking_id)
 
     def hold_ok(self, user, seat="A1", perf="P1") -> str:
         """홀드를 걸고 성공을 확인한 뒤 hold_id 를 돌려준다."""
@@ -102,9 +139,23 @@ class Env:
         assert resp.status_code == self.ok_status("holdSeat"), resp.text
         return resp.json()["hold_id"]
 
-    def confirm_ok(self, user, hold_id) -> None:
-        resp = self.confirm(user, hold_id)
+    def confirm_ok(self, user, hold_id, key=AUTO) -> dict:
+        """예매 요청을 보내 성공(Booking 형식)을 확인하고 응답 본문을 돌려준다."""
+        resp = self.confirm(user, hold_id, key)
         assert resp.status_code == self.ok_status("confirmBooking"), resp.text
+        self.validate(resp.json(), "Booking")
+        return resp.json()
+
+    def callback_ok(self, booking_id, result="SUCCEEDED") -> dict:
+        resp = self.callback(booking_id, result)
+        assert resp.status_code == self.ok_status("paymentCallback"), resp.text
+        self.validate(resp.json(), "Booking")
+        return resp.json()
+
+    def pay(self, user, hold_id) -> dict:
+        """예매 요청 → 성공 콜백(둘 다 지금 시각). 콜백 응답의 예매를 돌려준다."""
+        booking = self.confirm_ok(user, hold_id)
+        return self.callback_ok(booking["booking_id"])
 
     # ---- 검사
     def validate(self, body, schema_name: str) -> None:

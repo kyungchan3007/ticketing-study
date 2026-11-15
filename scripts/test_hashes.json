@@ -1,17 +1,18 @@
 {
   "files": {
-    "tests/api/conftest.py": "3020f431b35eadb1f5ca332077486abc859b1d423630f9faeaa597755d854316",
-    "tests/api/test_internal_error.py": "c91ef9dd0dde196dd1f778378dab602bb0772e3940b1818027ad095913a7f336",
-    "tests/api/test_unique_violation.py": "a794ecd130af361c2af955d99aded6887c23a563ad40d837aee3c286515bee0a",
+    "tests/api/conftest.py": "ad62ffcc6aace6ccbf6ce8a23bccb0e4f8d404fce3b437e83cbc687384a84341",
+    "tests/api/test_internal_error.py": "0aa4ea3052d43b6cf9d17e6a4a9ba1f493a894a35c9a09ff6dc476cd3ff8179d",
+    "tests/api/test_unique_violation.py": "38f37d5fd8e28a106867e641bc02c299462c381c59e94bb1cd6dfd5d7f4fcdbb",
     "tests/api/test_us01_performance_list.py": "b7df25b8210bf70eb1facdf0190f971089a6779974b7a03ddeb0d0c6eb3257e1",
-    "tests/api/test_us02_seat_map.py": "4905b4fbde0a79e805a8d5af1ca2ba93bfa26bcbed3e0502ee7222aeedb95214",
-    "tests/api/test_us03_hold_seat.py": "9505f944cab43d7f85d051d70ac1089937f977bd88eb239695fe380fce8f0085",
-    "tests/api/test_us04_confirm_booking.py": "879e804c043bde6286524966b2077b5458453b6bd0383e5648a9650694b8f949",
+    "tests/api/test_us02_seat_map.py": "1e1abc049136b95a1cc3d393df837093d0a475bb074491e52068b3351aae0b0a",
+    "tests/api/test_us03_hold_seat.py": "586f991717011e4665c5d0238a7861940758257be6927778a8ae0dabae6185ac",
+    "tests/api/test_us04_confirm_booking.py": "f1bff120e0ca715b1e077571eb0e6a2294f1a3a95f391fa01cfa0243725ac219",
+    "tests/api/test_us05_payment_callback.py": "12f27042548a00cb4fb2b272f0474dd03decbb798f9d104e12cfbc8d250745c6",
     "tests/capacity/test_capacity.py": "a30a9c2dc7d64d28bd63efad93d723b2957577d837813fadeaa31d63f53a3e21",
     "tests/concurrency/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "tests/concurrency/conftest.py": "e32912f9e3eab565c0b5fc62203d7829e1740c4abb2f653028ee8556fcb8a115",
-    "tests/concurrency/test_concurrency.py": "91f06108e9f885ebadac5121c68f373f833e0a5a76d077947f514c49bf941c17",
-    "tests/contract/test_openapi.py": "a8ae0cd598960ae78b30d1579101cc5460888b4f8b3536bc7967eefdfcc42056",
+    "tests/concurrency/test_concurrency.py": "3cba228fb925749dcd92764949a9010adfb34ff97941cfce0167b9bc378fd7a4",
+    "tests/contract/test_openapi.py": "19ccbdd1737f4415303daac5c817ed54a3a7521bc13e41f7345ac1caf07ef55b",
     "tests/test_smoke.py": "09b57af9eb9c82a19795528b996df79f0a63afe8ae1c75b0ac38fc9b853aa6ad"
   }
 }

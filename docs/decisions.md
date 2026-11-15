@@ -56,3 +56,26 @@
 - 2026-11-14 (server) 위반은 SQLSTATE 23505이면서 제약 이름 uq_bookings_seat일 때만 409로 바꾸고, 확정 핸들러에서 예매 줄을 넣은 직후 flush해 commit 전에 잡음 — 다른 제약 위반·DB 오류는 그대로 500으로 두려고.
 - 2026-11-14 (test) T-23 리뷰 #1은 기존 테스트에 더하지 않고 새 테스트로 나눔(기존 기대값 보존), #2는 bookings 기본 키(hold_id) 위반으로 재현 — 같은 SQLSTATE 23505라서 제약 이름까지 보는지를 함께 지킬 수 있어서.
 - 2026-11-14 (server) 롤백 확인용 변형은 예매 INSERT만 SAVEPOINT로 감싸고 좌석 SOLD를 커밋한 뒤 409를 돌려주게 함 — PostgreSQL은 오류 난 트랜잭션을 그대로 커밋할 수 없어서. 변형은 확인 뒤 되돌림.
+- 2026-11-15 (사람) 6장 열린 질문: Q2 본인 재홀드는 만료 시각을 늘리지 않음, Q11 모의 결제는 성공·실패를 둘 다 흉내 냄, Q1·Q13 이미 만든 예매를 같은 사람이 다시 요청하면 같은 예매, Q3 남의 홀드 확정 403, Q4 홀드 없음 404(지금 코드의 응답을 결정으로 옮김) — PRD 10절로 옮김.
+- 2026-11-15 (사람) 결제를 두 단계로: 예매 요청(Idempotency-Key)은 PENDING 예매만 만들고, 모의 결제사 콜백이 성공이면 SOLD, 실패면 예매만 실패(홀드 유지), 만료 뒤 성공 콜백은 팔지 않고 환불 필요로 기록. 시각은 backend/clock.py만.
+- 2026-11-15 (lead) Q2의 응답은 409 SEAT_ALREADY_HELD(지금 동작 유지) — 지시는 "만료 시각을 늘리지 않음"까지였고, 같은 홀드를 돌려주면 holdSeat 성공 코드가 둘(201·200)이 되어 계약·테스트 하네스의 "성공 코드 하나" 규칙과 어긋나서. Q1의 홀드 부분(같은 사용자의 동시 홀드)은 이 결정에 따라 1건 성공·나머지 409.
+- 2026-11-15 (lead) 계약: confirmBooking 성공 코드는 200 하나(새로 만들든 기존 예매를 돌려주든), 응답은 Booking(booking_id·hold_id·performance_id·seat_id·status), 예매 상태 이름 PENDING·PAID·FAILED·REFUND_REQUIRED, 콜백은 POST /payments/{booking_id}/callback 본문 {result: SUCCEEDED|FAILED}, 끝난 예매에 온 콜백은 결과와 상관없이 지금 상태를 200 — 성공 코드를 하나로 유지하고, 콜백이 결제사 재시도에 안전하게 하려고.
+- 2026-11-15 (lead) [임시 Q9] Idempotency-Key 없음과 콜백 본문 오류만 400 VALIDATION_ERROR로 계약에 넣음, 그 밖의 형식 오류는 Q9에 남김 — 키 필수를 계약으로 정하려면 응답이 필요했고 서버가 이미 쓰던 코드라서.
+- 2026-11-15 (lead) 실패(FAILED) 뒤에는 같은 홀드로 새 키를 써서 다시 예매 요청할 수 있고, 같은 키로 보내면 FAILED 예매를 그대로 돌려줌 — "실패면 홀드는 남는다"를 재시도 가능으로 읽음. 콜백에는 X-User-Id·서명 검증 없음(모의, 범위 밖).
+- 2026-11-15 (lead) 사람이 앞서 정한 "UNIQUE 위반은 409 SEAT_ALREADY_SOLD"를 두 단계에 맞춰 옮김: 확정은 더 이상 PAID 줄을 만들지 않아 uq_bookings_seat(PAID 부분 UNIQUE) 위반은 성공 콜백에서만 생기고, 그때는 2xx·REFUND_REQUIRED·좌석 그대로 — 뜻("서버 고장이 아니라 이미 팔린 좌석")은 같고, 결제사에 409를 돌려줄 이유가 없어서.
+- 2026-11-15 (lead) test·server가 같이 보는 DB 사실(bookings 열, uq_bookings_seat·uq_bookings_active_hold·uq_bookings_user_key 이름과 조건)을 api-harness.md 6절에 정함 — test가 DB 직접 조작 재현을 구현 전에 써야 해서.
+- 2026-11-15 (lead) story_report.py는 docs/stories에서 스토리 목록을 읽고 기본 대상에 tests/concurrency를 넣음 — US-05 줄이 나오고 실제 서버 테스트(AC-05-7)도 집계되게.
+- 2026-11-15 (lead) 예매 요청 검사 순서는 401 → 400(키 없음) → 홀드 조회 404 → 나머지(T-29 리뷰 지적 1) — 키 필수는 요청 형식 규칙이라 홀드 유무·DB 상태와 상관없이 같은 응답이어야 해서. T-32 리뷰의 낮음 지적(강제 경쟁 테스트가 스레드 생존을 확인하지 않음)은 이번에 반영하지 않음 — 비차단이고 지시 범위 밖이라서.
+- 2026-11-15 (test) 콜백 본문 오류는 {}, 모르는 값, null, 소문자, 다른 키, 본문 없음 모두 400(enum 대소문자 구분). 다른 IntegrityError는 테스트 DB에 임시 부분 UNIQUE 인덱스 zz_test_one_paid_per_performance를 만들었다 지워 재현 — 두 단계에서는 확정이 PK·UNIQUE를 만날 길이 없고 콜백이 만나는 제약은 uq_bookings_seat 하나뿐이라서.
+- 2026-11-15 (test) 같은 키·다른 좌석 경쟁은 동시 테스트와 별도로, 커밋하지 않은 (u1, k1) 줄(blocker)로 두 요청을 삽입에서 기다리게 하고 pg_stat_activity로 대기 2건을 확인한 뒤 푸는 강제 테스트를 추가 — 동시 출발만으로는 겹침을 보장할 수 없어서.
+- 2026-11-15 (server) 콜백 본문은 extra='forbid'(계약 additionalProperties:false), Idempotency-Key는 공백만이면 없음으로 보고 400·값은 trim하지 않고 저장, REFUND_REQUIRED만 있는 홀드도 만료 전이면 새 예매 허용(FAILED와 같게) — 지시에 없는 경우를 계약·FAILED 규칙에 맞춤.
+- 2026-11-15 (server) 마이그레이션 0002: 기존 예매 줄은 booking_id=hold_id·PAID·idempotency_key 'legacy-<hold_id>'로 옮기고, downgrade는 0001이 표현할 수 없는 PAID 아닌 줄을 지운 뒤 PK(hold_id)·전체 UNIQUE를 복구 — upgrade·downgrade가 데이터 손실 범위를 분명히 하며 왕복되게.
+- 2026-11-15 (server) 동시성은 모든 경로(홀드·예매 요청·콜백)가 같은 좌석 행 FOR UPDATE로 줄 서고, 늦은 요청은 잠금 뒤 기존 예매를 다시 읽어 돌려줌. 좌석 잠금이 다른 같은 키 경쟁은 uq_bookings_user_key 위반을 409 IDEMPOTENCY_KEY_REUSED로, uq_bookings_seat 위반은 SAVEPOINT로 잡아 REFUND_REQUIRED.
+- 2026-11-15 (lead) Idempotency-Key는 1~255자(문자 수), 넘으면 400 VALIDATION_ERROR — 사람이 재현한 무작위 3000자 키 500(uq_bookings_user_key btree 한도 초과)을 막고, 255자 × UTF-8 최대 4바이트 = 1020바이트라 키만으로는 한도 2704바이트에 닿지 않아서. 계약 maxLength·PRD 5절·US-04 AC-04-14에 반영.
+- 2026-11-15 (test) 긴 키 테스트는 secrets.token_hex 무작위 16진 키 사용 — 같은 글자 반복("k"*3000)은 DB가 압축해 인덱스 한도에 걸리지 않아 결함을 재현하지 못해서. 3000자 테스트는 500을 응답으로 받으려고 TestClient(raise_server_exceptions=False). 다중 좌석 동시 콜백은 5석·좌석당 10건, 좌석별 요청 순서를 섞음. AC-04-15는 동시 출발도 넣음.
+- 2026-11-15 (server) 키 길이 제한은 API에서만(DB CHECK·마이그레이션 없음), 초과 메시지 "Idempotency-Key 는 255자 이하여야 합니다." — 쓰기 경로가 API 하나뿐이고 API가 막으면 키만으로는 btree 한도에 닿지 않으며, 마이그레이션은 기존 긴 키 정리까지 필요해 변경이 커서. 적용 전 확인: tkt_server에 255자 초과 키 1건(PENDING, 5000자, 같은 글자 반복이라 압축돼 들어간 것으로 추정), 지우거나 바꾸지 않음.
+- 2026-11-15 (사람) Q10 일부: X-User-Id에도 길이 제한 — 키만 255자로 막아도 (user_id, idempotency_key) 복합 인덱스에서 긴 사용자 ID로 500이 다시 나서(T-35 리뷰, 원칙 충돌로 사람에게 올림). PRD 10절로 옮김.
+- 2026-11-15 (lead) X-User-Id는 1~255자, 공백뿐이거나 초과면 401 UNAUTHORIZED — 공백뿐인 값의 기존 처리([임시 Q10] 401)와 같게 하고, 사용자 검사가 키 검사보다 먼저라서. 255+255자는 최악의 UTF-8로도 약 2040바이트라 btree 한도(약 2704바이트) 안.
+- 2026-11-15 (test) 긴 사용자 ID 500 경로는 남의 홀드로는 403에서 끝나 재현되지 않아, 긴 사용자 소유 홀드를 SQL로 직접 만든 뒤 그 사용자로 예매 요청하는 테스트를 더함(테스트 전용 HTTP 경로 없음). 긴 ID는 무작위 16진, 홀드 없음 확인은 holds 줄 수.
+- 2026-11-15 (server) X-User-Id 길이는 앞뒤 공백을 뗀 값(저장하는 값)의 문자 수로 재고, 401 메시지는 기존 "X-User-Id 헤더가 필요합니다." 그대로, DB 제한은 넣지 않음(T-34와 같은 이유). tkt_server의 255자 초과 user_id는 bookings 0건, holds 1건(lead 재현 때 만든 홀드).
+- 2026-11-15 (lead) T-38 리뷰 낮음 지적(사용자 ID 255자 + 키 255자를 함께 쓰는 복합 인덱스 경계 테스트 없음)은 이번에 반영하지 않음 — 비차단이고 계산상 안전해서.

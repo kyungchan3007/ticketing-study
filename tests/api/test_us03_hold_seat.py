@@ -18,12 +18,12 @@ def test_us03_ac03_1_hold_success(env):
 
 
 def test_us03_ac03_2_other_user_blocked_before_expiry(env):
-    """US-03 / AC-03-2: T0 u1 홀드 → T0+4분59초 u2 홀드는 409 SEAT_ALREADY_HELD, 홀드는 여전히 u1 의 것(u1 확정 성공)"""
+    """US-03 / AC-03-2: T0 u1 홀드 → T0+4분59초 u2 홀드는 409 SEAT_ALREADY_HELD, 홀드는 여전히 u1 의 것(u1 예매 요청 성공, 성공 콜백으로 SOLD)"""
     env.at(env.T0)
     h1 = env.hold_ok("u1", "A1")
     env.at(env.t(minutes=4, seconds=59))
     env.assert_error(env.hold("u2", "A1"), 409, "SEAT_ALREADY_HELD")
-    env.confirm_ok("u1", h1)
+    env.pay("u1", h1)
     assert env.statuses("P1")["A1"] == "SOLD"
 
 
@@ -38,7 +38,7 @@ def test_us03_ac03_3_rehold_after_expiry(env):
     assert resp.json()["expires_at"] == "2026-12-01T10:10:00Z"
     h2 = resp.json()["hold_id"]
     assert h2 != h1
-    env.confirm_ok("u2", h2)
+    env.pay("u2", h2)
     assert env.statuses("P1")["A1"] == "SOLD"
 
 
@@ -57,9 +57,9 @@ def test_us03_ac03_3_expiry_judged_after_seat_lock(env):
 
 
 def test_us03_ac03_4_sold_seat_cannot_be_held(env):
-    """US-03 / AC-03-4: u1 이 홀드·확정해 SOLD 인 A1 을 u2 가 홀드하면 409 SEAT_ALREADY_SOLD, T0+1시간 뒤에도 같고 SOLD 유지"""
+    """US-03 / AC-03-4: u1 이 홀드·예매 요청·성공 콜백으로 SOLD 인 A1 을 u2 가 홀드하면 409 SEAT_ALREADY_SOLD, T0+1시간 뒤에도 같고 SOLD 유지"""
     env.at(env.T0)
-    env.confirm_ok("u1", env.hold_ok("u1", "A1"))
+    env.pay("u1", env.hold_ok("u1", "A1"))
     env.assert_error(env.hold("u2", "A1"), 409, "SEAT_ALREADY_SOLD")
     assert env.statuses("P1")["A1"] == "SOLD"
     env.at(env.t(hours=1))
@@ -68,7 +68,7 @@ def test_us03_ac03_4_sold_seat_cannot_be_held(env):
 
 
 def test_us03_ac03_5_concurrent_hold_exactly_one(env):
-    """US-03 / AC-03-5: u1~u10 이 A1 을 동시에 홀드하면 2xx 정확히 1건, 나머지 9건은 409 SEAT_ALREADY_HELD, 성공자만 확정"""
+    """US-03 / AC-03-5: u1~u10 이 A1 을 동시에 홀드하면 2xx 정확히 1건, 나머지 9건은 409 SEAT_ALREADY_HELD, 성공자만 예매 요청"""
     for _ in range(env.rounds):
         env.reset(env.default_performances)
         env.at(env.T0)
@@ -80,11 +80,11 @@ def test_us03_ac03_5_concurrent_hold_exactly_one(env):
                 env.assert_error(r, 409, "SEAT_ALREADY_HELD")
         winner, win_resp = winners[0]
         assert env.statuses("P1")["A1"] == "HELD"
-        # 성공하지 못한 사용자는 승자의 홀드로 확정할 수 없다(거절).
+        # 성공하지 못한 사용자는 승자의 홀드로 예매를 요청할 수 없다(거절).
         loser = next(u for u in env.users if u != winner)
         env.assert_rejected(env.confirm(loser, win_resp.json()["hold_id"]))
         assert env.statuses("P1")["A1"] == "HELD"
-        env.confirm_ok(winner, win_resp.json()["hold_id"])
+        env.pay(winner, win_resp.json()["hold_id"])
         assert env.statuses("P1")["A1"] == "SOLD"
 
 
@@ -94,3 +94,17 @@ def test_us03_ac03_6_hold_requires_user_header(env):
     env.at(env.T0)
     env.assert_error(env.hold(None, "A1"), 401, "UNAUTHORIZED")
     assert env.statuses("P1")["A1"] == "AVAILABLE"
+
+
+def test_us03_ac03_8_rehold_by_owner_does_not_extend_expiry(env):
+    """US-03 / AC-03-8: T0 u1 홀드 → T0+3분 u1 재홀드는 409 SEAT_ALREADY_HELD, 만료는 처음 그대로(T0+5분 u1 의 처음 홀드 예매 요청은 409 HOLD_EXPIRED, u2 홀드는 2xx)"""
+    env.at(env.T0)
+    h1 = env.hold_ok("u1", "A1")
+    env.at(env.t(minutes=3))
+    env.assert_error(env.hold("u1", "A1"), 409, "SEAT_ALREADY_HELD")
+    assert env.statuses("P1")["A1"] == "HELD"
+    env.at(env.t(minutes=5))
+    env.assert_error(env.confirm("u1", h1), 409, "HOLD_EXPIRED")
+    resp = env.hold("u2", "A1")
+    assert resp.status_code == env.ok_status("holdSeat"), resp.text
+    assert resp.json()["expires_at"] == "2026-12-01T10:10:00Z"

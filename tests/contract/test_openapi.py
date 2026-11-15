@@ -3,14 +3,15 @@
 - 계약 파일(docs/openapi.yaml)이 없으면 전부 실패(RED)한다.
 - 테스트 이름은 test_us<스토리번호>_ac<AC번호>_... 형식이고, docstring 첫 줄에 "US-xx / AC-xx-y"를 적는다.
   scripts/story_report.py가 이 이름 규칙으로 스토리별 결과를 센다.
-- [열린 질문]이 붙은 인수 조건(AC-02-4, AC-03-7, AC-04-8, AC-04-9)은 테스트를 만들지 않는다.
-  AC-04-4의 구매자 확인(Q13), AC-04-5의 나머지 9건 응답(Q1)도 검사하지 않는다.
+- [열린 질문]이 붙은 인수 조건(AC-02-4, AC-03-7)은 테스트를 만들지 않는다.
+  AC-04-4·5·8·9는 6장에서 Q1·Q3·Q4·Q13 이 결정돼 이제 검사한다.
 
 계약이 지켜야 할 이름 규칙(경로·필드 이름은 계약이 정하지만, 테스트가 operation을 찾으려면 필요하다):
-  operationId: listPerformances, getSeatMap, holdSeat, confirmBooking   (스토리 US-01~04)
+  operationId: listPerformances, getSeatMap, holdSeat, confirmBooking, paymentCallback   (스토리 US-01~05)
   (시각 주입·시드 초기화 같은 테스트 전용 경로는 공개 계약에 넣지 않는다. 구현 단계에서 정한다.)
   응답 필드:  공연 id/title, 좌석 id(seat_id)/status, 홀드 hold_id/expires_at
-  확정 대상:  hold_id (경로 파라미터 또는 요청 본문 필드)
+  예매 요청 대상: hold_id (경로 파라미터 또는 요청 본문 필드), 헤더 Idempotency-Key 필수
+  콜백 대상:  booking_id (경로 파라미터), 본문 result = SUCCEEDED | FAILED
   사용자 헤더: X-User-Id
 """
 
@@ -184,6 +185,31 @@ def assert_confirm_target_is_hold_id(op, path_params):
     assert in_path or in_body, "확정 요청이 hold_id(경로 또는 본문)로 홀드를 지정하지 않는다"
 
 
+def assert_idempotency_header(op, path_params):
+    hs = [p for p in params(op, path_params) if p.get("in") == "header" and p.get("name", "").lower() == "idempotency-key"]
+    assert hs, "Idempotency-Key 헤더 파라미터가 없다"
+    assert any(p.get("required") is True for p in hs), "Idempotency-Key 가 required: true 가 아니다"
+
+
+BOOKING_STATUSES = {"PENDING", "PAID", "FAILED", "REFUND_REQUIRED"}
+
+
+def assert_booking_success(op, expected_status=None):
+    """성공 응답이 booking_id 와 예매 상태(PENDING/PAID/FAILED/REFUND_REQUIRED)를 가진다."""
+    p = props(success_schema(op))
+    assert "booking_id" in p, "성공 응답에 booking_id 가 없다"
+    assert "status" in p, "성공 응답에 예매 status 가 없다"
+    assert set(p["status"].get("enum", [])) == BOOKING_STATUSES, "예매 status enum 이 PENDING/PAID/FAILED/REFUND_REQUIRED 와 정확히 같지 않다"
+
+
+def assert_callback_target_and_body(op, path_params):
+    assert any(p.get("in") == "path" and p.get("name") == "booking_id" for p in params(op, path_params)), "콜백이 booking_id 경로 파라미터로 예매를 지정하지 않는다"
+    body = (((op.get("requestBody") or {}).get("content") or {}).get("application/json") or {}).get("schema") or {}
+    assert "result" in props(body), "콜백 본문에 result 가 없다"
+    assert set(props(body)["result"].get("enum", [])) == {"SUCCEEDED", "FAILED"}, "result enum 이 SUCCEEDED/FAILED 와 정확히 같지 않다"
+    assert "result" in required(body), "콜백 본문에서 result 가 required 가 아니다"
+
+
 # ---------------------------------------------------------------- US-01
 def test_us01_ac01_1_list_performances_success():
     """US-01 / AC-01-1: 공연 목록 GET, 2xx, 공연마다 ID와 제목"""
@@ -224,12 +250,13 @@ def test_us02_ac02_1_seatmap_all_available():
 
 
 def test_us02_ac02_2_seatmap_mixed_states():
-    """US-02 / AC-02-2: 좌석맵 status 가 AVAILABLE/HELD/SOLD 를 모두 표현하고 홀드·확정 operation 이 있다"""
+    """US-02 / AC-02-2: 좌석맵 status 가 AVAILABLE/HELD/SOLD 를 모두 표현하고 홀드·예매 요청·결제 콜백(SOLD 로 만드는 경로) operation 이 있다"""
     spec = load_spec()
     _, _, seatmap, _ = find_op(spec, "getSeatMap")
     assert_seatmap_schema(seatmap)
     find_op(spec, "holdSeat")
     find_op(spec, "confirmBooking")
+    find_op(spec, "paymentCallback")
 
 
 def test_us02_ac02_3_seatmap_scoped_to_performance():
@@ -313,13 +340,14 @@ def test_us03_ac03_6_hold_requires_user():
 
 # ---------------------------------------------------------------- US-04
 def test_us04_ac04_1_confirm_success():
-    """US-04 / AC-04-1: 확정 POST, hold_id 로 대상 지정, 2xx"""
+    """US-04 / AC-04-1: 예매 요청 POST, hold_id 로 대상 지정, 2xx 응답에 booking_id 와 예매 상태(PENDING 포함)"""
     spec = load_spec()
     _, method, op, pp = find_op(spec, "confirmBooking")
     assert method == "post"
-    success_response(op)
+    assert_booking_success(op)
     assert_confirm_target_is_hold_id(op, pp)
     assert_user_header(op, pp, need=True)
+    assert_idempotency_header(op, pp)
 
 
 def test_us04_ac04_2_confirm_expired():
@@ -340,17 +368,17 @@ def test_us04_ac04_3_confirm_with_old_hold_after_rehold():
 
 
 def test_us04_ac04_4_confirm_sold_seat():
-    """US-04 / AC-04-4: 이미 SOLD 인 좌석 확정은 409 SEAT_ALREADY_SOLD (구매자 확인은 Q13 대기라 제외)"""
+    """US-04 / AC-04-4: 이미 SOLD 인 좌석의 예매 요청은 409 SEAT_ALREADY_SOLD"""
     spec = load_spec()
     _, _, op, _ = find_op(spec, "confirmBooking")
     assert_error(op, "409", "SEAT_ALREADY_SOLD")
 
 
 def test_us04_ac04_5_concurrent_confirm():
-    """US-04 / AC-04-5: 동시 확정: 2xx 성공 응답이 있다 (나머지 9건의 코드는 Q1 대기라 제외)"""
+    """US-04 / AC-04-5: 같은 사람의 동시 예매 요청은 모두 2xx 이고 같은 booking_id 를 돌려준다(성공 응답에 booking_id)"""
     spec = load_spec()
     _, _, op, _ = find_op(spec, "confirmBooking")
-    success_response(op)
+    assert_booking_success(op)
 
 
 def test_us04_ac04_6_hold_then_confirm_race():
@@ -372,8 +400,147 @@ def test_us04_ac04_7_confirm_requires_user():
     assert_error(op, "401", "UNAUTHORIZED")
 
 
+def test_us04_ac04_8_other_users_hold_forbidden():
+    """US-04 / AC-04-8: 다른 사용자의 홀드로 예매를 요청하면 403 FORBIDDEN"""
+    spec = load_spec()
+    _, _, op, _ = find_op(spec, "confirmBooking")
+    assert_error(op, "403", "FORBIDDEN")
+
+
+def test_us04_ac04_9_hold_not_found():
+    """US-04 / AC-04-9: 없는 홀드로 예매를 요청하면 404 NOT_FOUND"""
+    spec = load_spec()
+    _, _, op, _ = find_op(spec, "confirmBooking")
+    assert_error(op, "404", "NOT_FOUND")
+
+
+def test_us04_ac04_10_same_key_same_response():
+    """US-04 / AC-04-10: 같은 키로 다시 보내면 같은 응답을 돌려주므로 Idempotency-Key 가 필수 헤더이고 성공 응답이 예매다"""
+    spec = load_spec()
+    _, _, op, pp = find_op(spec, "confirmBooking")
+    assert_idempotency_header(op, pp)
+    assert_booking_success(op)
+
+
+def test_us04_ac04_11_paid_booking_returned():
+    """US-04 / AC-04-11: 이미 팔린 예매를 다시 요청하면 같은 예매(PAID)를 돌려주므로 성공 응답의 상태에 PAID 가 있다"""
+    spec = load_spec()
+    _, _, op, _ = find_op(spec, "confirmBooking")
+    assert_booking_success(op)
+
+
+def test_us04_ac04_12_missing_idempotency_key():
+    """US-04 / AC-04-12: Idempotency-Key 가 없으면 400 VALIDATION_ERROR"""
+    spec = load_spec()
+    _, _, op, pp = find_op(spec, "confirmBooking")
+    assert_idempotency_header(op, pp)
+    assert_error(op, "400", "VALIDATION_ERROR")
+
+
+def test_us04_ac04_13_key_reused_for_other_hold():
+    """US-04 / AC-04-13: 같은 키를 다른 홀드에 쓰면 409 IDEMPOTENCY_KEY_REUSED"""
+    spec = load_spec()
+    _, _, op, _ = find_op(spec, "confirmBooking")
+    assert_error(op, "409", "IDEMPOTENCY_KEY_REUSED")
+
+
+def test_us04_ac04_14_idempotency_key_length_limit():
+    """US-04 / AC-04-14: Idempotency-Key 는 1~255자(minLength 1, maxLength 255)이고 넘으면 400 VALIDATION_ERROR"""
+    spec = load_spec()
+    _, _, op, pp = find_op(spec, "confirmBooking")
+    hs = [p for p in params(op, pp) if p.get("in") == "header" and p.get("name", "").lower() == "idempotency-key"]
+    assert hs, "Idempotency-Key 헤더 파라미터가 없다"
+    schema = hs[0].get("schema", {})
+    assert (schema.get("minLength"), schema.get("maxLength")) == (1, 255), f"키 길이 제한이 1~255 가 아니다: {schema}"
+    assert_error(op, "400", "VALIDATION_ERROR")
+
+
+@pytest.mark.parametrize("operation_id", ["holdSeat", "confirmBooking"])
+def test_us04_ac04_16_user_id_length_limit(operation_id):
+    """US-04 / AC-04-16: X-User-Id 는 1~255자(minLength 1, maxLength 255)이고 넘으면 401 UNAUTHORIZED"""
+    spec = load_spec()
+    _, _, op, pp = find_op(spec, operation_id)
+    hs = [p for p in params(op, pp) if p.get("in") == "header" and p.get("name", "").lower() == "x-user-id"]
+    assert hs, "X-User-Id 헤더 파라미터가 없다"
+    schema = hs[0].get("schema", {})
+    assert (schema.get("minLength"), schema.get("maxLength")) == (1, 255), f"ID 길이 제한이 1~255 가 아니다: {schema}"
+    assert_error(op, "401", "UNAUTHORIZED")
+
+
+# ---------------------------------------------------------------- US-05
+def test_us05_ac05_1_callback_success_response():
+    """US-05 / AC-05-1: 콜백 POST, booking_id 로 예매 지정, 본문 result(SUCCEEDED/FAILED), 2xx 응답에 booking_id 와 예매 상태"""
+    spec = load_spec()
+    path, method, op, pp = find_op(spec, "paymentCallback")
+    assert method == "post"
+    assert_callback_target_and_body(op, pp)
+    assert_booking_success(op)
+
+
+def test_us05_ac05_2_callback_refund_required_state():
+    """US-05 / AC-05-2: 만료 뒤 성공 콜백은 2xx 로 응답하고 예매 상태 REFUND_REQUIRED 를 표현할 수 있다(오류 응답이 아니다)"""
+    spec = load_spec()
+    _, _, op, _ = find_op(spec, "paymentCallback")
+    assert_booking_success(op)
+    assert not [c for c in responses(op) if c in {"409", "410"}], "만료 뒤 성공 콜백은 2xx 여야 해서 409/410 을 선언하지 않는다"
+
+
+def test_us05_ac05_3_late_success_after_rehold():
+    """US-05 / AC-05-3: 다른 사람이 다시 잡은 뒤 늦은 성공 콜백도 2xx 로 응답하고 상태를 돌려준다"""
+    spec = load_spec()
+    _, _, op, _ = find_op(spec, "paymentCallback")
+    assert_booking_success(op)
+
+
+def test_us05_ac05_4_failed_callback():
+    """US-05 / AC-05-4: 콜백 본문 result 에 FAILED 가 있고 응답 예매 상태에 FAILED 가 있다"""
+    spec = load_spec()
+    _, _, op, pp = find_op(spec, "paymentCallback")
+    assert_callback_target_and_body(op, pp)
+    assert_booking_success(op)
+
+
+def test_us05_ac05_5_duplicate_callback():
+    """US-05 / AC-05-5: 같은 콜백이 또 와도 2xx 로 지금 상태를 돌려주므로 오류 응답이 아니라 Booking 을 돌려준다"""
+    spec = load_spec()
+    _, _, op, _ = find_op(spec, "paymentCallback")
+    assert_booking_success(op)
+    assert not [c for c in responses(op) if c.startswith("409")], "끝난 예매의 중복 콜백은 409 가 아니다"
+
+
+def test_us05_ac05_6_finished_booking_ignores_other_result():
+    """US-05 / AC-05-6: 끝난 예매에 다른 결과가 와도 2xx 로 지금 상태를 돌려준다(콜백에 X-User-Id 가 필요 없다)"""
+    spec = load_spec()
+    _, _, op, pp = find_op(spec, "paymentCallback")
+    assert_booking_success(op)
+    assert_user_header(op, pp, need=False)
+
+
+def test_us05_ac05_7_concurrent_callbacks_response():
+    """US-05 / AC-05-7: 동시 콜백 20건이 모두 2xx PAID 이려면 성공 응답이 하나이고 예매 상태를 담는다"""
+    spec = load_spec()
+    _, _, op, _ = find_op(spec, "paymentCallback")
+    assert_booking_success(op)
+    assert len(success_response(op)) == 1, "성공 코드가 하나가 아니다"
+
+
+def test_us05_ac05_8_callback_booking_not_found():
+    """US-05 / AC-05-8: 없는 예매의 콜백은 404 NOT_FOUND"""
+    spec = load_spec()
+    _, _, op, _ = find_op(spec, "paymentCallback")
+    assert_error(op, "404", "NOT_FOUND")
+
+
+def test_us05_ac05_9_callback_invalid_result():
+    """US-05 / AC-05-9: 결과가 없거나 SUCCEEDED·FAILED 가 아니면 400 VALIDATION_ERROR"""
+    spec = load_spec()
+    _, _, op, pp = find_op(spec, "paymentCallback")
+    assert_callback_target_and_body(op, pp)
+    assert_error(op, "400", "VALIDATION_ERROR")
+
+
 # ---------------------------------------------------------------- 공통: 처리하지 못한 예외(T-13)
-@pytest.mark.parametrize("operation_id", ["listPerformances", "getSeatMap", "holdSeat", "confirmBooking"])
+@pytest.mark.parametrize("operation_id", ["listPerformances", "getSeatMap", "holdSeat", "confirmBooking", "paymentCallback"])
 def test_internal_error_500_declared_as_error_schema(operation_id):
     """공통(T-13): 모든 operation 에 500 응답이 {code, message} 오류 스키마이고 code INTERNAL_ERROR 로 명시돼 있다"""
     spec = load_spec()
@@ -382,7 +549,8 @@ def test_internal_error_500_declared_as_error_schema(operation_id):
 
 
 def test_internal_error_code_in_error_schema_enum():
-    """공통(T-13): components.schemas.Error 의 code enum 에 INTERNAL_ERROR 가 있다"""
+    """공통(T-13·6장): components.schemas.Error 의 code enum 에 INTERNAL_ERROR, FORBIDDEN, IDEMPOTENCY_KEY_REUSED, VALIDATION_ERROR 가 있다"""
     spec = load_spec()
     code = props(deref(spec, spec["components"]["schemas"]["Error"]))["code"]
-    assert "INTERNAL_ERROR" in code.get("enum", []), f"Error.code enum 에 INTERNAL_ERROR 가 없다: {code.get('enum')}"
+    missing = {"INTERNAL_ERROR", "FORBIDDEN", "IDEMPOTENCY_KEY_REUSED", "VALIDATION_ERROR"} - set(code.get("enum", []))
+    assert not missing, f"Error.code enum 에 {sorted(missing)} 가 없다: {code.get('enum')}"
