@@ -258,6 +258,9 @@ def test_us04_ac04_13_same_key_two_seats_overlap_forced(env):
         blocker.close()
         for t in locals().get("threads", []):
             t.join(timeout=30)
+    # finally 안에서는 올리지 않는다(겹치지 않음 AssertionError 를 덮지 않으려고). 정상 경로에서만 먼저 검사한다.
+    stuck = [t.name for t in threads if t.is_alive()]
+    assert not stuck, f"잠금을 푼 뒤 30초 안에 요청이 끝나지 않았다: {stuck}"
     got = sorted(_outcome(r) for r in results.values())
     assert got == [(200, "PENDING"), (409, "IDEMPOTENCY_KEY_REUSED")], got
     rows = env.sql("select hold_id, status from bookings where user_id = 'u1' and idempotency_key = 'k1'")
